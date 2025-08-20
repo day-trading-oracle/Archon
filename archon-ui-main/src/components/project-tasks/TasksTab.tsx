@@ -497,6 +497,85 @@ export const TasksTab = ({
     }
   };
 
+  // Task feature move function with optimistic updates and rollback
+  const moveTaskFeature = async (taskId: string, newFeature: string) => {
+    console.log(`[TasksTab] Attempting to move task ${taskId} to new feature: ${newFeature}`);
+    
+    const movingTask = tasks.find(task => task.id === taskId);
+    if (!movingTask) {
+      console.warn(`[TasksTab] Task ${taskId} not found for feature move operation.`);
+      return;
+    }
+    
+    const oldFeature = movingTask.feature;
+    
+    // Save original state for rollback
+    const originalTasks = [...tasks];
+    
+    console.log(`[TasksTab] Moving task ${movingTask.title} from feature ${oldFeature} to ${newFeature}`);
+
+    try {
+      // Optimistic update: Update UI immediately
+      const optimisticTask = {
+        ...movingTask,
+        feature: newFeature,
+        lastUpdate: Date.now()
+      };
+      
+      const optimisticTasks = tasks.map(task => 
+        task.id === taskId ? optimisticTask : task
+      );
+      
+      // Apply optimistic update to UI
+      updateTasks(optimisticTasks);
+      console.log(`[TasksTab] Applied optimistic update for task ${taskId} feature change`);
+
+      // Attempt server update
+      await projectService.updateTask(taskId, {
+        feature: newFeature,
+        client_timestamp: Date.now()
+      });
+      
+      console.log(`[TasksTab] Successfully updated task ${taskId} feature in backend.`);
+      
+    } catch (error) {
+      console.error(`[TasksTab] Failed to move task ${taskId} to feature ${newFeature}:`, error);
+      
+      // Rollback: Restore original state
+      console.log(`[TasksTab] Rolling back optimistic feature update for task ${taskId}`);
+      updateTasks(originalTasks);
+      
+      // User-friendly error message
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      const notification = document.createElement('div');
+      notification.className = 'fixed top-4 right-4 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg z-[9999] transition-all duration-300';
+      notification.innerHTML = `
+        <div class="flex items-center gap-2">
+          <svg class="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clip-rule="evenodd" />
+          </svg>
+          <div>
+            <div class="font-medium">Failed to change task feature</div>
+            <div class="text-sm opacity-90">${errorMessage}</div>
+          </div>
+        </div>
+      `;
+      
+      document.body.appendChild(notification);
+      
+      // Auto-remove notification after 5 seconds
+      setTimeout(() => {
+        notification.style.opacity = '0';
+        notification.style.transform = 'translateX(100%)';
+        setTimeout(() => {
+          if (notification.parentNode) {
+            notification.parentNode.removeChild(notification);
+          }
+        }, 300);
+      }, 5000);
+    }
+  };
+
   const completeTask = (taskId: string) => {
     console.log(`[TasksTab] Calling completeTask for ${taskId}`);
     moveTask(taskId, 'complete');
@@ -664,6 +743,7 @@ export const TasksTab = ({
               onTaskComplete={completeTask}
               onTaskDelete={deleteTask}
               onTaskMove={moveTask}
+              onTaskFeatureMove={moveTaskFeature}
               onTaskReorder={handleTaskReorder}
             />
           )}
