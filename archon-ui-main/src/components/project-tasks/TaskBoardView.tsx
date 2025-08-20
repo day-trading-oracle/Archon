@@ -2,7 +2,7 @@ import React, { useRef, useState, useCallback } from 'react';
 import { useDrag, useDrop } from 'react-dnd';
 import { useToast } from '../../contexts/ToastContext';
 import { DeleteConfirmModal } from '../../pages/ProjectPage';
-import { CheckSquare, Square, Trash2, ArrowRight } from 'lucide-react';
+import { CheckSquare, Square, Trash2, ArrowRight, ChevronDown, ChevronRight } from 'lucide-react';
 import { projectService } from '../../services/projectService';
 import { Task } from './TaskTableView'; // Import Task interface
 import { ItemTypes, getAssigneeIcon, getAssigneeGlow, getOrderColor, getOrderGlow } from '../../lib/task-utils';
@@ -17,7 +17,7 @@ interface TaskBoardViewProps {
   onTaskReorder: (taskId: string, targetIndex: number, status: Task['status']) => void;
 }
 
-interface ColumnDropZoneProps {
+interface RowDropZoneProps {
   status: Task['status'];
   title: string;
   tasks: Task[];
@@ -31,9 +31,11 @@ interface ColumnDropZoneProps {
   onTaskHover: (taskId: string | null) => void;
   selectedTasks: Set<string>;
   onTaskSelect: (taskId: string) => void;
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
 }
 
-const ColumnDropZone = ({
+const RowDropZone = ({
   status,
   title,
   tasks,
@@ -46,15 +48,17 @@ const ColumnDropZone = ({
   hoveredTaskId,
   onTaskHover,
   selectedTasks,
-  onTaskSelect
-}: ColumnDropZoneProps) => {
+  onTaskSelect,
+  isCollapsed,
+  onToggleCollapse
+}: RowDropZoneProps) => {
   const ref = useRef<HTMLDivElement>(null);
   
   const [{ isOver }, drop] = useDrop({
     accept: ItemTypes.TASK,
     drop: (item: { id: string; status: string }) => {
       if (item.status !== status) {
-        // Moving to different status - use length of current column as new order
+        // Moving to different status - use length of current row as new order
         onTaskMove(item.id, status);
       }
     },
@@ -65,31 +69,31 @@ const ColumnDropZone = ({
 
   drop(ref);
 
-  // Get column header color based on status
-  const getColumnColor = () => {
+  // Get row header color based on status
+  const getRowColor = () => {
     switch (status) {
       case 'backlog':
-        return 'text-gray-600 dark:text-gray-400';
+        return 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/50';
       case 'in-progress':
-        return 'text-blue-600 dark:text-blue-400';
+        return 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30';
       case 'review':
-        return 'text-purple-600 dark:text-purple-400';
+        return 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30';
       case 'complete':
-        return 'text-green-600 dark:text-green-400';
+        return 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/30';
     }
   };
 
-  // Get column header glow based on status
-  const getColumnGlow = () => {
+  // Get row border color based on status
+  const getBorderColor = () => {
     switch (status) {
       case 'backlog':
-        return 'bg-gray-500/30';
+        return 'border-gray-200 dark:border-gray-700';
       case 'in-progress':
-        return 'bg-blue-500/30 shadow-[0_0_10px_2px_rgba(59,130,246,0.2)]';
+        return 'border-blue-200 dark:border-blue-800';
       case 'review':
-        return 'bg-purple-500/30 shadow-[0_0_10px_2px_rgba(168,85,247,0.2)]';
+        return 'border-purple-200 dark:border-purple-800';
       case 'complete':
-        return 'bg-green-500/30 shadow-[0_0_10px_2px_rgba(16,185,129,0.2)]';
+        return 'border-green-200 dark:border-green-800';
     }
   };
 
@@ -97,32 +101,63 @@ const ColumnDropZone = ({
   const organizedTasks = tasks;
 
   return (
-    <div 
-      ref={ref} 
-      className={`flex flex-col bg-white/20 dark:bg-black/30 ${isOver ? 'bg-gray-100/50 dark:bg-gray-800/20 border-t-2 border-t-[#00ff00] shadow-[inset_0_1px_10px_rgba(0,255,0,0.1)]' : ''} transition-colors duration-200 h-full`}
-    >
-      <div className="text-center py-3 sticky top-0 z-10 bg-white/80 dark:bg-black/80 backdrop-blur-sm">
-        <h3 className={`font-mono ${getColumnColor()} text-sm`}>{title}</h3>
-        {/* Column header divider with glow */}
-        <div className={`absolute bottom-0 left-[15%] right-[15%] w-[70%] mx-auto h-[1px] ${getColumnGlow()}`}></div>
-      </div>
+    <div className={`border rounded-lg overflow-hidden ${getBorderColor()} ${isOver ? 'ring-2 ring-[#00ff00] ring-opacity-50' : ''}`}>
+      {/* Row Header with Toggle */}
+      <button
+        onClick={onToggleCollapse}
+        className={`w-full px-4 py-3 flex items-center justify-between ${getRowColor()} hover:opacity-80 transition-opacity`}
+        aria-expanded={!isCollapsed}
+        aria-controls={`row-content-${status}`}
+      >
+        <div className="flex items-center gap-3">
+          <div className="flex items-center">
+            {isCollapsed ? (
+              <ChevronRight className="w-4 h-4" />
+            ) : (
+              <ChevronDown className="w-4 h-4" />
+            )}
+          </div>
+          <h3 className="font-mono text-sm font-medium">{title}</h3>
+          <span className="text-xs opacity-70">({organizedTasks.length})</span>
+        </div>
+      </button>
       
-      <div className="px-1 flex-1 overflow-y-auto space-y-3 py-3">
-        {organizedTasks.map((task, index) => (
-          <DraggableTaskCard
-            key={task.id}
-            task={task}
-            index={index}
-            onView={() => onTaskView(task)}
-            onComplete={() => onTaskComplete(task.id)}
-            onDelete={onTaskDelete}
-            onTaskReorder={onTaskReorder}
-            tasksInStatus={organizedTasks}
-            allTasks={allTasks}
-            hoveredTaskId={hoveredTaskId}
-            onTaskHover={onTaskHover}
-          />
-        ))}
+      {/* Collapsible Content */}
+      <div 
+        ref={ref}
+        id={`row-content-${status}`}
+        className={`
+          transition-all duration-300 ease-in-out overflow-hidden
+          ${!isCollapsed ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'}
+          ${isOver ? 'bg-gray-100/50 dark:bg-gray-800/20' : 'bg-white/50 dark:bg-black/20'}
+        `}
+      >
+        <div className="p-4 overflow-x-auto">
+          <div className="flex gap-4 min-h-[200px]">
+            {organizedTasks.map((task, index) => (
+              <div key={task.id} className="flex-shrink-0 w-72">
+                <DraggableTaskCard
+                  task={task}
+                  index={index}
+                  onView={() => onTaskView(task)}
+                  onComplete={() => onTaskComplete(task.id)}
+                  onDelete={onTaskDelete}
+                  onTaskReorder={onTaskReorder}
+                  tasksInStatus={organizedTasks}
+                  allTasks={allTasks}
+                  hoveredTaskId={hoveredTaskId}
+                  onTaskHover={onTaskHover}
+                />
+              </div>
+            ))}
+            {/* Empty state for collapsed rows */}
+            {organizedTasks.length === 0 && (
+              <div className="flex-shrink-0 w-80 h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg flex items-center justify-center text-gray-500 dark:text-gray-400">
+                Drop tasks here
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -138,6 +173,9 @@ export const TaskBoardView = ({
 }: TaskBoardViewProps) => {
   const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null);
   const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
+  
+  // Collapse state for each status row
+  const [collapsedRows, setCollapsedRows] = useState<Set<Task['status']>>(new Set());
 
   // State for delete confirmation modal
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -165,6 +203,23 @@ export const TaskBoardView = ({
   const clearSelection = useCallback(() => {
     setSelectedTasks(new Set());
   }, []);
+
+  // Collapse/expand handlers
+  const toggleRowCollapse = useCallback((status: Task['status']) => {
+    setCollapsedRows(prev => {
+      const newCollapsed = new Set(prev);
+      if (newCollapsed.has(status)) {
+        newCollapsed.delete(status);
+      } else {
+        newCollapsed.add(status);
+      }
+      return newCollapsed;
+    });
+  }, []);
+
+  const isRowCollapsed = useCallback((status: Task['status']) => {
+    return collapsedRows.has(status);
+  }, [collapsedRows]);
 
   // Mass delete handler
   const handleMassDelete = useCallback(async () => {
@@ -312,10 +367,10 @@ export const TaskBoardView = ({
         </div>
       )}
 
-      {/* Board Columns */}
-      <div className="grid grid-cols-4 gap-0 flex-1">
-        {/* Backlog Column */}
-        <ColumnDropZone
+      {/* Board Rows */}
+      <div className="flex-1 space-y-4 overflow-y-auto p-4">
+        {/* Backlog Row */}
+        <RowDropZone
           status="backlog"
           title="Backlog"
           tasks={getTasksByStatus('backlog')}
@@ -329,10 +384,12 @@ export const TaskBoardView = ({
           onTaskHover={setHoveredTaskId}
           selectedTasks={selectedTasks}
           onTaskSelect={toggleTaskSelection}
+          isCollapsed={isRowCollapsed('backlog')}
+          onToggleCollapse={() => toggleRowCollapse('backlog')}
         />
         
-        {/* In Progress Column */}
-        <ColumnDropZone
+        {/* In Progress Row */}
+        <RowDropZone
           status="in-progress"
           title="In Process"
           tasks={getTasksByStatus('in-progress')}
@@ -346,10 +403,12 @@ export const TaskBoardView = ({
           onTaskHover={setHoveredTaskId}
           selectedTasks={selectedTasks}
           onTaskSelect={toggleTaskSelection}
+          isCollapsed={isRowCollapsed('in-progress')}
+          onToggleCollapse={() => toggleRowCollapse('in-progress')}
         />
         
-        {/* Review Column */}
-        <ColumnDropZone
+        {/* Review Row */}
+        <RowDropZone
           status="review"
           title="Review"
           tasks={getTasksByStatus('review')}
@@ -363,10 +422,12 @@ export const TaskBoardView = ({
           onTaskHover={setHoveredTaskId}
           selectedTasks={selectedTasks}
           onTaskSelect={toggleTaskSelection}
+          isCollapsed={isRowCollapsed('review')}
+          onToggleCollapse={() => toggleRowCollapse('review')}
         />
         
-        {/* Complete Column */}
-        <ColumnDropZone
+        {/* Complete Row */}
+        <RowDropZone
           status="complete"
           title="Complete"
           tasks={getTasksByStatus('complete')}
@@ -380,6 +441,8 @@ export const TaskBoardView = ({
           onTaskHover={setHoveredTaskId}
           selectedTasks={selectedTasks}
           onTaskSelect={toggleTaskSelection}
+          isCollapsed={isRowCollapsed('complete')}
+          onToggleCollapse={() => toggleRowCollapse('complete')}
         />
       </div>
 

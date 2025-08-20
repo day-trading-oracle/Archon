@@ -11,8 +11,7 @@ import { TaskTableView, Task } from './TaskTableView';
 import { TaskBoardView } from './TaskBoardView';
 import { EditTaskModal } from './EditTaskModal';
 
-// Assignee utilities
-const ASSIGNEE_OPTIONS = ['User', 'Archon', 'AI IDE Agent'] as const;
+// Assignee utilities - removed hardcoded options, now using dynamic assignees
 
 // Mapping functions for status conversion
 const mapUIStatusToDBStatus = (uiStatus: Task['status']): DatabaseTaskStatus => {
@@ -415,35 +414,86 @@ export const TasksTab = ({
     debouncedPersistSingleTask(updatedTask);
   }, [tasks, updateTasks, debouncedPersistSingleTask]);
 
-  // Task move function (for board view)
+  // Task move function (for board view) with optimistic updates and rollback
   const moveTask = async (taskId: string, newStatus: Task['status']) => {
     console.log(`[TasksTab] Attempting to move task ${taskId} to new status: ${newStatus}`);
+    
+    const movingTask = tasks.find(task => task.id === taskId);
+    if (!movingTask) {
+      console.warn(`[TasksTab] Task ${taskId} not found for move operation.`);
+      return;
+    }
+    
+    const oldStatus = movingTask.status;
+    const newOrder = getNextOrderForStatus(newStatus);
+    
+    // Save original state for rollback
+    const originalTasks = [...tasks];
+    const originalTask = { ...movingTask };
+    
+    console.log(`[TasksTab] Moving task ${movingTask.title} from ${oldStatus} to ${newStatus} with order ${newOrder}`);
+
     try {
-      const movingTask = tasks.find(task => task.id === taskId);
-      if (!movingTask) {
-        console.warn(`[TasksTab] Task ${taskId} not found for move operation.`);
-        return;
-      }
+      // Optimistic update: Update UI immediately
+      const optimisticTask = {
+        ...movingTask,
+        status: newStatus,
+        task_order: newOrder,
+        lastUpdate: Date.now()
+      };
       
-      const oldStatus = movingTask.status;
-      const newOrder = getNextOrderForStatus(newStatus);
+      const optimisticTasks = tasks.map(task => 
+        task.id === taskId ? optimisticTask : task
+      );
+      
+      // Apply optimistic update to UI
+      updateTasks(optimisticTasks);
+      console.log(`[TasksTab] Applied optimistic update for task ${taskId}`);
 
-      console.log(`[TasksTab] Moving task ${movingTask.title} from ${oldStatus} to ${newStatus} with order ${newOrder}`);
-
-      // Update the task with new status and order
+      // Attempt server update
       await projectService.updateTask(taskId, {
         status: mapUIStatusToDBStatus(newStatus),
         task_order: newOrder,
         client_timestamp: Date.now()
       });
-      console.log(`[TasksTab] Successfully updated task ${taskId} status in backend.`);
       
-      // Don't update local state immediately - let socket handle it
-      console.log(`[TasksTab] Waiting for socket update for task ${taskId}.`);
+      console.log(`[TasksTab] Successfully updated task ${taskId} status in backend.`);
       
     } catch (error) {
       console.error(`[TasksTab] Failed to move task ${taskId}:`, error);
-      alert(`Failed to move task: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      
+      // Rollback: Restore original state
+      console.log(`[TasksTab] Rolling back optimistic update for task ${taskId}`);
+      updateTasks(originalTasks);
+      
+      // User-friendly error message
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      const notification = document.createElement('div');
+      notification.className = 'fixed top-4 right-4 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg z-[9999] transition-all duration-300';
+      notification.innerHTML = `
+        <div class="flex items-center gap-2">
+          <svg class="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clip-rule="evenodd" />
+          </svg>
+          <div>
+            <div class="font-medium">Failed to move task</div>
+            <div class="text-sm opacity-90">${errorMessage}</div>
+          </div>
+        </div>
+      `;
+      
+      document.body.appendChild(notification);
+      
+      // Auto-remove notification after 5 seconds
+      setTimeout(() => {
+        notification.style.opacity = '0';
+        notification.style.transform = 'translateX(100%)';
+        setTimeout(() => {
+          if (notification.parentNode) {
+            notification.parentNode.removeChild(notification);
+          }
+        }, 300);
+      }, 5000);
     }
   };
 
@@ -527,6 +577,25 @@ export const TasksTab = ({
       throw error;
     }
   };
+
+  // Get unique assignees from all tasks for dynamic dropdown
+  const getAvailableAssignees = useCallback((): string[] => {
+    const assignees = new Set<string>();
+    
+    // Add assignees from all existing tasks
+    tasks.forEach(task => {
+      if (task.assignee?.name) {
+        assignees.add(task.assignee.name);
+      }
+    });
+    
+    // Ensure backwards compatibility with default assignees
+    const defaultAssignees = ['User', 'Archon', 'AI IDE Agent'];
+    defaultAssignees.forEach(assignee => assignees.add(assignee));
+    
+    // Return sorted array for consistent order
+    return Array.from(assignees).sort();
+  }, [tasks]);
 
   // Get tasks for priority selection with descriptive labels
   const getTasksForPrioritySelection = (status: Task['status']): Array<{value: number, label: string}> => {
@@ -673,6 +742,7 @@ export const TasksTab = ({
           onClose={closeModal}
           onSave={saveTask}
           getTasksForPrioritySelection={memoizedGetTasksForPrioritySelection}
+          availableAssignees={getAvailableAssignees()}
         />
       </div>
     </DndProvider>

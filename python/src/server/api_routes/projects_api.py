@@ -571,6 +571,7 @@ async def list_tasks(
             project_id=project_id,
             status=status,
             include_closed=include_closed,
+            exclude_large_fields=exclude_large_fields,
         )
 
         if not success:
@@ -795,14 +796,14 @@ async def mcp_update_task_status_with_socketio(task_id: str, status: str):
 
 
 @router.get("/projects/{project_id}/docs")
-async def list_project_documents(project_id: str):
+async def list_project_documents(project_id: str, exclude_large_fields: bool = False):
     """List all documents for a specific project."""
     try:
         logfire.info(f"Listing documents for project | project_id={project_id}")
 
         # Use DocumentService to list documents
         document_service = DocumentService()
-        success, result = document_service.list_documents(project_id)
+        success, result = document_service.list_documents(project_id, exclude_large_fields=exclude_large_fields)
 
         if not success:
             if "not found" in result.get("error", "").lower():

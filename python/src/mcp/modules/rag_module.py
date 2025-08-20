@@ -79,19 +79,10 @@ def register_rag_tools(mcp: FastMCP):
         ctx: Context, query: str, source: str = None, match_count: int = 5
     ) -> str:
         """
-        Perform a RAG (Retrieval Augmented Generation) query on stored content.
+        Vector search on indexed content.
 
-        This tool searches the vector database for content relevant to the query and returns
-        the matching documents. Optionally filter by source domain.
-        Get the source by using the get_available_sources tool before calling this search!
-
-        Args:
-            query: The search query
-            source: Optional source domain to filter results (e.g., 'example.com')
-            match_count: Maximum number of results to return (default: 5)
-
-        Returns:
-            JSON string with search results
+        Always specify source for precision. Use get_available_sources first.
+        Minimum match_count of 10 recommended.
         """
         try:
             api_url = get_api_url()
@@ -135,21 +126,10 @@ def register_rag_tools(mcp: FastMCP):
         ctx: Context, query: str, source_id: str = None, match_count: int = 5
     ) -> str:
         """
-        Search for code examples relevant to the query.
+        Search code examples in knowledge base.
 
-        This tool searches the vector database for code examples relevant to the query and returns
-        the matching examples with their summaries. Optionally filter by source_id.
-        Get the source_id by using the get_available_sources tool before calling this search!
-
-        Use the get_available_sources tool first to see what sources are available for filtering.
-
-        Args:
-            query: The search query
-            source_id: Optional source ID to filter results (e.g., 'example.com')
-            match_count: Maximum number of results to return (default: 5)
-
-        Returns:
-            JSON string with search results
+        Always specify source for precision. Use get_available_sources first.
+        Minimum match_count of 10 recommended.
         """
         try:
             api_url = get_api_url()

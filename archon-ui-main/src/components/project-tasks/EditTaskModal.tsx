@@ -14,9 +14,8 @@ interface EditTaskModalProps {
   onClose: () => void;
   onSave: (task: Task) => Promise<void>;
   getTasksForPrioritySelection: (status: Task['status']) => Array<{value: number, label: string}>;
+  availableAssignees: string[];
 }
-
-const ASSIGNEE_OPTIONS = ['User', 'Archon', 'AI IDE Agent'] as const;
 
 // Removed debounce utility - now using DebouncedInput component
 
@@ -28,7 +27,8 @@ export const EditTaskModal = memo(({
   isSavingTask,
   onClose,
   onSave,
-  getTasksForPrioritySelection
+  getTasksForPrioritySelection,
+  availableAssignees
 }: EditTaskModalProps) => {
   const [localTask, setLocalTask] = useState<Task | null>(null);
   
@@ -85,7 +85,7 @@ export const EditTaskModal = memo(({
   const handleAssigneeChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     setLocalTask(prev => prev ? {
       ...prev,
-      assignee: { name: e.target.value as 'User' | 'Archon' | 'AI IDE Agent', avatar: '' }
+      assignee: { name: e.target.value, avatar: '' }
     } : null);
   }, []);
   
@@ -168,11 +168,11 @@ export const EditTaskModal = memo(({
               <div>
                 <label className="block text-gray-700 dark:text-gray-300 mb-1">Assignee</label>
                 <select 
-                  value={localTask?.assignee?.name || 'User'} 
+                  value={localTask?.assignee?.name || (availableAssignees[0] || 'User')} 
                   onChange={handleAssigneeChange}
                   className="w-full bg-white/50 dark:bg-black/70 border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-white rounded-md py-2 px-3 focus:outline-none focus:border-cyan-400 focus:shadow-[0_0_10px_rgba(34,211,238,0.2)] transition-all duration-300"
                 >
-                  {ASSIGNEE_OPTIONS.map(option => (
+                  {availableAssignees.map(option => (
                     <option key={option} value={option}>{option}</option>
                   ))}
                 </select>
