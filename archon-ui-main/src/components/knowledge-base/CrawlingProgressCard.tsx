@@ -218,8 +218,75 @@ export const CrawlingProgressCard: React.FC<CrawlingProgressCardProps> = ({
       } else if (currentStatus === 'completed') {
         step.status = 'completed';
         step.percentage = 100;
+      } else if (isUpload && (currentStatus === 'processing' || currentStatus === 'document_storage')) {
+        // For file uploads, handle folder uploads differently from single files
+        const isFolderUpload = progressData.fileCount && progressData.fileCount > 1;
+        
+        if (isFolderUpload) {
+          // For folder uploads: keep early stages at 100% once passed
+          // Only animate the final stage (Storing Chunks) as we process files
+          if (currentPercentage >= 85) {
+            // We're in the final storage phase
+            if (stepIndex < 5) { // First 5 steps are complete
+              step.status = 'completed';
+              step.percentage = 100;
+            } else if (stepIndex === 5) { // Storing step (index 5)
+              step.status = 'active';
+              // Map 85-100% progress to 0-100% for this step
+              const storageProgress = ((currentPercentage - 85) / 15) * 100;
+              step.percentage = Math.round(storageProgress);
+            }
+          } else {
+            // Still in early phases - fill steps progressively
+            const stepPercentage = 85 / 5; // First 5 steps share 0-85%
+            const stepThreshold = stepIndex * stepPercentage;
+            const nextStepThreshold = (stepIndex + 1) * stepPercentage;
+            
+            if (stepIndex === 5) {
+              // Storing step is pending
+              step.status = 'pending';
+              step.percentage = 0;
+            } else if (currentPercentage >= nextStepThreshold) {
+              // This step is complete
+              step.status = 'completed';
+              step.percentage = 100;
+            } else if (currentPercentage > stepThreshold) {
+              // This is the active step
+              step.status = 'active';
+              const progressInStep = currentPercentage - stepThreshold;
+              const stepRange = nextStepThreshold - stepThreshold;
+              step.percentage = Math.round((progressInStep / stepRange) * 100);
+            } else {
+              // This step is pending
+              step.status = 'pending';
+              step.percentage = 0;
+            }
+          }
+        } else {
+          // Single file upload - use linear progress distribution
+          const stepPercentage = 100 / steps.length;
+          const stepThreshold = stepIndex * stepPercentage;
+          const nextStepThreshold = (stepIndex + 1) * stepPercentage;
+          
+          if (currentPercentage >= nextStepThreshold) {
+            // This step is complete
+            step.status = 'completed';
+            step.percentage = 100;
+          } else if (currentPercentage > stepThreshold) {
+            // This is the active step
+            step.status = 'active';
+            // Calculate progress within this step
+            const progressInStep = currentPercentage - stepThreshold;
+            const stepRange = nextStepThreshold - stepThreshold;
+            step.percentage = Math.round((progressInStep / stepRange) * 100);
+          } else {
+            // This step is pending
+            step.status = 'pending';
+            step.percentage = 0;
+          }
+        }
       } else if (step.id === normalizedStatus) {
-        // This is the active step
+        // This is the active step (for URL crawling or exact status matches)
         step.status = 'active';
         // Calculate phase-specific percentage based on overall progress
         // Each phase has a range in the overall progress:

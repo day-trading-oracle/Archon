@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link as LinkIcon, Upload, Trash2, RefreshCw, Code, FileText, Brain, BoxIcon, Pencil } from 'lucide-react';
+import { Link as LinkIcon, Upload, Folder, Trash2, RefreshCw, Code, FileText, Brain, BoxIcon, Pencil } from 'lucide-react';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Checkbox } from '../ui/Checkbox';
@@ -318,8 +318,16 @@ export const KnowledgeItemCard = ({
                 className={`w-4 h-4 ${sourceIconColor}`} 
                 title={item.metadata.original_url || item.url || 'URL not available'}
               />
+            ) : item.metadata.source_type === 'folder' ? (
+              <Folder 
+                className={`w-4 h-4 ${sourceIconColor}`} 
+                title="Folder upload"
+              />
             ) : (
-              <Upload className={`w-4 h-4 ${sourceIconColor}`} />
+              <Upload 
+                className={`w-4 h-4 ${sourceIconColor}`} 
+                title="File upload"
+              />
             )}
             {/* Knowledge type icon */}
             <TypeIcon className={`w-4 h-4 ${typeIconColor}`} />

@@ -416,12 +416,29 @@ class SourceManagementService:
                 logger.error(f"Failed to delete from sources: {source_error}")
                 return False, {"error": f"Failed to delete source: {str(source_error)}"}
 
+            # Delete from archon_project_sources table - clean up any references to this source
+            try:
+                logger.info(f"Deleting from archon_project_sources table for source_id: {source_id}")
+                project_sources_response = (
+                    self.supabase_client.table("archon_project_sources")
+                    .delete()
+                    .eq("source_id", source_id)
+                    .execute()
+                )
+                project_sources_deleted = len(project_sources_response.data) if project_sources_response.data else 0
+                logger.info(f"Deleted {project_sources_deleted} project source references")
+            except Exception as project_sources_error:
+                # Log the error but don't fail the operation - archon_project_sources cleanup is secondary
+                logger.warning(f"Failed to delete from archon_project_sources (non-critical): {project_sources_error}")
+                project_sources_deleted = 0
+
             logger.info("Delete operation completed successfully")
             return True, {
                 "source_id": source_id,
                 "pages_deleted": pages_deleted,
                 "code_examples_deleted": code_deleted,
                 "source_records_deleted": source_deleted,
+                "project_sources_deleted": project_sources_deleted,
             }
 
         except Exception as e:

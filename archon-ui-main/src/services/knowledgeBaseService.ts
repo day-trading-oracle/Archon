@@ -6,7 +6,7 @@
 export interface KnowledgeItemMetadata {
   knowledge_type?: 'technical' | 'business'
   tags?: string[]
-  source_type?: 'url' | 'file'
+  source_type?: 'url' | 'file' | 'folder'
   status?: 'active' | 'processing' | 'error'
   description?: string
   last_scraped?: string
@@ -42,7 +42,7 @@ export interface KnowledgeItemsResponse {
 export interface KnowledgeItemsFilter {
   knowledge_type?: 'technical' | 'business'
   tags?: string[]
-  source_type?: 'url' | 'file'
+  source_type?: 'url' | 'file' | 'folder'
   search?: string
   page?: number
   per_page?: number
@@ -231,6 +231,43 @@ class KnowledgeBaseService {
     }
 
     return response.json()
+  }
+
+  /**
+   * Upload a folder with multiple files to the knowledge base
+   */
+  async uploadFolder(folderName: string, files: File[], metadata: UploadMetadata = {}) {
+    console.log('📁 [KnowledgeBase] Uploading folder:', folderName, 'with', files.length, 'files');
+    
+    const formData = new FormData()
+    formData.append('folder_name', folderName)
+    
+    // Add all files to the FormData
+    files.forEach((file, index) => {
+      formData.append('files', file)
+    })
+    
+    // Send metadata fields as expected by backend API
+    if (metadata.knowledge_type) {
+      formData.append('knowledge_type', metadata.knowledge_type)
+    }
+    if (metadata.tags && metadata.tags.length > 0) {
+      formData.append('tags', JSON.stringify(metadata.tags))
+    }
+    
+    const response = await fetch(`${API_BASE_URL}/documents/upload-folder`, {
+      method: 'POST',
+      body: formData
+    })
+
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.error || `HTTP ${response.status}`)
+    }
+
+    const result = await response.json()
+    console.log('📁 [KnowledgeBase] Folder upload response:', result);
+    return result
   }
 
   /**
