@@ -648,8 +648,8 @@ export const TaskTableView = ({
     if (!taskToDelete) return;
 
     try {
-      await projectService.deleteTask(taskToDelete.id); // Call backend service
-      onTaskDelete(taskToDelete); // Notify parent component
+      // Use parent's deleteTask function which handles optimistic updates
+      await onTaskDelete(taskToDelete);
       showToast(`Task "${taskToDelete.title}" deleted successfully`, 'success');
     } catch (error) {
       console.error('Failed to delete task:', error);
@@ -658,7 +658,7 @@ export const TaskTableView = ({
       setShowDeleteConfirm(false);
       setTaskToDelete(null);
     }
-  }, [taskToDelete, onTaskDelete, showToast, setShowDeleteConfirm, setTaskToDelete, projectService]);
+  }, [taskToDelete, onTaskDelete, showToast, setShowDeleteConfirm, setTaskToDelete]);
 
   // Cancel deletion
   const cancelDeleteTask = useCallback(() => {

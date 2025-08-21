@@ -127,6 +127,24 @@ export const TasksTab = ({
         console.log('Task already exists, skipping create');
         return prev;
       }
+      
+      // Check if there's a temporary task that matches this one (by title and status)
+      // This handles the case where our optimistic update is confirmed by socket
+      const tempTaskIndex = prev.findIndex(task => 
+        task.id.startsWith('temp-') && 
+        task.title === mappedTask.title && 
+        task.status === mappedTask.status
+      );
+      
+      if (tempTaskIndex !== -1) {
+        console.log('Replacing temporary task with real task from socket');
+        const updated = [...prev];
+        updated[tempTaskIndex] = mappedTask;
+        setTimeout(() => onTasksChange(updated), 0);
+        return updated;
+      }
+      
+      // Add as new task
       const updated = [...prev, mappedTask];
       setTimeout(() => onTasksChange(updated), 0);
       return updated;
@@ -221,11 +239,16 @@ export const TasksTab = ({
     setEditingTask(task);
     
     setIsSavingTask(true);
+    
+    // Save original state for rollback (only for new tasks)
+    const originalTasks = task.id ? null : [...tasks];
+    let tempId: string | null = null;
+    
     try {
       let parentTaskId = task.id;
       
       if (task.id) {
-        // Update existing task
+        // Update existing task (no optimistic update needed, socket handles it)
         const updateData: UpdateTaskRequest = {
           title: task.title,
           description: task.description,
@@ -238,7 +261,34 @@ export const TasksTab = ({
         
         await projectService.updateTask(task.id, updateData);
       } else {
-        // Create new task first to get UUID
+        // Create new task with optimistic update
+        console.log('[TasksTab] Creating new task via modal with optimistic update');
+        
+        // Generate temporary ID for optimistic update
+        tempId = `temp-${crypto.randomUUID()}`;
+        
+        // Create optimistic task with ALL required fields properly formatted
+        const optimisticTask: Task = {
+          id: tempId,
+          title: task.title,
+          description: task.description || '',
+          status: task.status,
+          assignee: {
+            name: task.assignee?.name || 'User',
+            avatar: ''  // Required field, can be empty
+          },
+          feature: task.feature || 'General',
+          featureColor: task.featureColor || '#3b82f6',
+          task_order: task.task_order,
+          lastUpdate: Date.now()  // For conflict resolution
+        } as Task;
+        
+        // Optimistic update: Add to UI immediately
+        const optimisticTasks = [...tasks, optimisticTask];
+        updateTasks(optimisticTasks);
+        console.log('[TasksTab] Task added to UI optimistically with temp ID:', tempId);
+        
+        // Create task on backend
         const createData: CreateTaskRequest = {
           project_id: projectId,
           title: task.title,
@@ -252,12 +302,25 @@ export const TasksTab = ({
         
         const createdTask = await projectService.createTask(createData);
         parentTaskId = createdTask.id;
+        console.log('[TasksTab] Task creation confirmed by backend with ID:', parentTaskId);
+        
+        // Replace temp task with real task from backend
+        const finalTasks = tasks.map(t => 
+          t.id === tempId ? mapDatabaseTaskToUITask(createdTask) : t
+        );
+        updateTasks(finalTasks);
       }
       
-      // Don't reload tasks - let socket updates handle synchronization
       closeModal();
     } catch (error) {
       console.error('Failed to save task:', error);
+      
+      // Rollback on error (only for new tasks)
+      if (originalTasks && tempId) {
+        console.log('[TasksTab] Rolling back task creation');
+        updateTasks(originalTasks);
+      }
+      
       alert(`Failed to save task: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsSavingTask(false);
@@ -582,24 +645,70 @@ export const TasksTab = ({
   };
 
   const deleteTask = async (task: Task) => {
+    console.log(`[TasksTab] Attempting to delete task ${task.id}: ${task.title}`);
+    
+    // Save original state for rollback
+    const originalTasks = [...tasks];
+    
     try {
-      // Delete the task - backend will emit socket event
-      await projectService.deleteTask(task.id);
-      console.log(`[TasksTab] Task ${task.id} deletion sent to backend`);
+      // Optimistic update: Remove from UI immediately
+      const optimisticTasks = tasks.filter(t => t.id !== task.id);
+      updateTasks(optimisticTasks);
+      console.log(`[TasksTab] Task ${task.id} removed from UI optimistically`);
       
-      // Don't update local state - let socket handle it
+      // Delete the task - backend will emit socket event for other clients
+      await projectService.deleteTask(task.id);
+      console.log(`[TasksTab] Task ${task.id} deletion confirmed by backend`);
+      
+      // Socket event will also arrive, but our UI is already updated
+      // The socket handler will detect the task is already removed and skip update
       
     } catch (error) {
       console.error('Failed to delete task:', error);
-      // Note: The toast notification for deletion is now handled by TaskBoardView and TaskTableView
+      
+      // Rollback on error: Restore original state
+      console.log(`[TasksTab] Rolling back deletion of task ${task.id}`);
+      updateTasks(originalTasks);
+      
+      // Note: The toast notification for deletion error is handled by TaskBoardView and TaskTableView
+      throw error; // Re-throw to let the calling component handle error notification
     }
   };
 
   // Inline task creation function
   const createTaskInline = async (newTask: Omit<Task, 'id'>) => {
+    console.log('[TasksTab] Creating new task with optimistic update');
+    
+    // Generate temporary ID for optimistic update
+    const tempId = `temp-${crypto.randomUUID()}`;
+    
+    // Auto-assign next order number if not provided
+    const nextOrder = newTask.task_order || getNextOrderForStatus(newTask.status);
+    
+    // Create optimistic task with ALL required fields properly formatted
+    const optimisticTask: Task = {
+      id: tempId,
+      title: newTask.title,
+      description: newTask.description || '',
+      status: newTask.status,
+      assignee: {
+        name: newTask.assignee?.name || 'User',
+        avatar: ''  // Required field, can be empty
+      },
+      feature: newTask.feature || 'General',
+      featureColor: newTask.featureColor || '#3b82f6',
+      task_order: nextOrder,
+      lastUpdate: Date.now()  // For conflict resolution
+    } as Task;
+    
+    // Save original state for rollback
+    const originalTasks = [...tasks];
+    
     try {
-      // Auto-assign next order number if not provided
-      const nextOrder = newTask.task_order || getNextOrderForStatus(newTask.status);
+      // Optimistic update: Add to UI immediately
+      const optimisticTasks = [...tasks, optimisticTask];
+      updateTasks(optimisticTasks);
+      console.log('[TasksTab] Task added to UI optimistically with temp ID:', tempId);
       
       const createData: CreateTaskRequest = {
         project_id: projectId,
@@ -612,13 +721,22 @@ export const TasksTab = ({
         ...(newTask.featureColor && { featureColor: newTask.featureColor })
       };
       
-      await projectService.createTask(createData);
+      const createdTask = await projectService.createTask(createData);
+      console.log('[TasksTab] Task creation confirmed by backend with ID:', createdTask.id);
       
-      // Don't reload tasks - let socket updates handle synchronization
-      console.log('[TasksTab] Task creation sent to backend, waiting for socket update');
+      // Replace temp task with real task from backend
+      const finalTasks = tasks.map(t => 
+        t.id === tempId ? mapDatabaseTaskToUITask(createdTask) : t
+      );
+      updateTasks(finalTasks);
       
     } catch (error) {
       console.error('Failed to create task:', error);
+      
+      // Rollback on error: Restore original state
+      console.log('[TasksTab] Rolling back task creation');
+      updateTasks(originalTasks);
+      
       throw error;
     }
   };

@@ -451,9 +451,8 @@ export const TaskBoardView = ({
     if (!taskToDelete) return;
 
     try {
-      await projectService.deleteTask(taskToDelete.id);
-      // Notify parent to update tasks
-      onTaskDelete(taskToDelete);
+      // Use parent's deleteTask function which handles optimistic updates
+      await onTaskDelete(taskToDelete);
       showToast(`Task "${taskToDelete.title}" deleted successfully`, 'success');
     } catch (error) {
       console.error('Failed to delete task:', error);
