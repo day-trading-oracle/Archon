@@ -81,20 +81,10 @@ def register_rag_tools(mcp: FastMCP):
         ctx: Context, query: str, source_domain: str = None, match_count: int = 5
     ) -> str:
         """
-        Search knowledge base for relevant content using RAG.
+        Vector search on indexed content.
 
-        Args:
-            query: Search query
-            source_domain: Optional domain filter (e.g., 'docs.anthropic.com').
-                          Note: This is a domain name, not the source_id from get_available_sources.
-            match_count: Max results (default: 5)
-
-        Returns:
-            JSON string with structure:
-            - success: bool - Operation success status
-            - results: list[dict] - Array of matching documents with content and metadata
-            - reranked: bool - Whether results were reranked
-            - error: str|null - Error description if success=false
+        Always specify source for precision. Use get_available_sources first.
+        Minimum match_count of 10 recommended.
         """
         try:
             api_url = get_api_url()
@@ -138,20 +128,10 @@ def register_rag_tools(mcp: FastMCP):
         ctx: Context, query: str, source_domain: str = None, match_count: int = 5
     ) -> str:
         """
-        Search for relevant code examples in the knowledge base.
+        Search code examples in knowledge base.
 
-        Args:
-            query: Search query
-            source_domain: Optional domain filter (e.g., 'docs.anthropic.com').
-                          Note: This is a domain name, not the source_id from get_available_sources.
-            match_count: Max results (default: 5)
-
-        Returns:
-            JSON string with structure:
-            - success: bool - Operation success status
-            - results: list[dict] - Array of code examples with content and summaries
-            - reranked: bool - Whether results were reranked
-            - error: str|null - Error description if success=false
+        Always specify source for precision. Use get_available_sources first.
+        Minimum match_count of 10 recommended.
         """
         try:
             api_url = get_api_url()

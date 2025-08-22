@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Link as LinkIcon, Upload, Trash2, RefreshCw, Code, FileText, Brain, BoxIcon, Globe, ChevronRight, Pencil } from 'lucide-react';
+import { Link as LinkIcon, Upload, Folder, Trash2, RefreshCw, Code, FileText, Brain, BoxIcon, Globe, ChevronRight, Pencil } from 'lucide-react';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { KnowledgeItem, KnowledgeItemMetadata } from '../../services/knowledgeBaseService';
@@ -303,6 +303,8 @@ export const GroupedKnowledgeItemCard = ({
         {/* Source type icon */}
         {item.metadata.source_type === 'url' ? (
           <LinkIcon className={`w-4 h-4 ${getSourceIconColor(item)}`} />
+        ) : item.metadata.source_type === 'folder' ? (
+          <Folder className={`w-4 h-4 ${getSourceIconColor(item)}`} />
         ) : (
           <Upload className={`w-4 h-4 ${getSourceIconColor(item)}`} />
         )}

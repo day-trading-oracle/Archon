@@ -3,4 +3,10 @@ __pycache__
 .serena
 .claude/settings.local.json
 PRPs/local
-/logs/
+
+# CLAUDE FAST FRAMEWORK (PRIVATE)
+.claude/
+CLAUDE.md
+
+# Personal modifications - keep private  
+ABDO_PERSONAL_MODIFICATIONS/

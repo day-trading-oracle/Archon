@@ -11,8 +11,7 @@ import { TaskTableView, Task } from './TaskTableView';
 import { TaskBoardView } from './TaskBoardView';
 import { EditTaskModal } from './EditTaskModal';
 
-// Assignee utilities
-const ASSIGNEE_OPTIONS = ['User', 'Archon', 'AI IDE Agent'] as const;
+// Assignee utilities - removed hardcoded options, now using dynamic assignees
 
 // Mapping functions for status conversion
 const mapUIStatusToDBStatus = (uiStatus: Task['status']): DatabaseTaskStatus => {
@@ -128,6 +127,24 @@ export const TasksTab = ({
         console.log('Task already exists, skipping create');
         return prev;
       }
+      
+      // Check if there's a temporary task that matches this one (by title and status)
+      // This handles the case where our optimistic update is confirmed by socket
+      const tempTaskIndex = prev.findIndex(task => 
+        task.id.startsWith('temp-') && 
+        task.title === mappedTask.title && 
+        task.status === mappedTask.status
+      );
+      
+      if (tempTaskIndex !== -1) {
+        console.log('Replacing temporary task with real task from socket');
+        const updated = [...prev];
+        updated[tempTaskIndex] = mappedTask;
+        setTimeout(() => onTasksChange(updated), 0);
+        return updated;
+      }
+      
+      // Add as new task
       const updated = [...prev, mappedTask];
       setTimeout(() => onTasksChange(updated), 0);
       return updated;
@@ -222,11 +239,16 @@ export const TasksTab = ({
     setEditingTask(task);
     
     setIsSavingTask(true);
+    
+    // Save original state for rollback (only for new tasks)
+    const originalTasks = task.id ? null : [...tasks];
+    let tempId: string | null = null;
+    
     try {
       let parentTaskId = task.id;
       
       if (task.id) {
-        // Update existing task
+        // Update existing task (no optimistic update needed, socket handles it)
         const updateData: UpdateTaskRequest = {
           title: task.title,
           description: task.description,
@@ -239,7 +261,34 @@ export const TasksTab = ({
         
         await projectService.updateTask(task.id, updateData);
       } else {
-        // Create new task first to get UUID
+        // Create new task with optimistic update
+        console.log('[TasksTab] Creating new task via modal with optimistic update');
+        
+        // Generate temporary ID for optimistic update
+        tempId = `temp-${crypto.randomUUID()}`;
+        
+        // Create optimistic task with ALL required fields properly formatted
+        const optimisticTask: Task = {
+          id: tempId,
+          title: task.title,
+          description: task.description || '',
+          status: task.status,
+          assignee: {
+            name: task.assignee?.name || 'User',
+            avatar: ''  // Required field, can be empty
+          },
+          feature: task.feature || 'General',
+          featureColor: task.featureColor || '#3b82f6',
+          task_order: task.task_order,
+          lastUpdate: Date.now()  // For conflict resolution
+        } as Task;
+        
+        // Optimistic update: Add to UI immediately
+        const optimisticTasks = [...tasks, optimisticTask];
+        updateTasks(optimisticTasks);
+        console.log('[TasksTab] Task added to UI optimistically with temp ID:', tempId);
+        
+        // Create task on backend
         const createData: CreateTaskRequest = {
           project_id: projectId,
           title: task.title,
@@ -253,12 +302,25 @@ export const TasksTab = ({
         
         const createdTask = await projectService.createTask(createData);
         parentTaskId = createdTask.id;
+        console.log('[TasksTab] Task creation confirmed by backend with ID:', parentTaskId);
+        
+        // Replace temp task with real task from backend
+        const finalTasks = tasks.map(t => 
+          t.id === tempId ? mapDatabaseTaskToUITask(createdTask) : t
+        );
+        updateTasks(finalTasks);
       }
       
-      // Don't reload tasks - let socket updates handle synchronization
       closeModal();
     } catch (error) {
       console.error('Failed to save task:', error);
+      
+      // Rollback on error (only for new tasks)
+      if (originalTasks && tempId) {
+        console.log('[TasksTab] Rolling back task creation');
+        updateTasks(originalTasks);
+      }
+      
       alert(`Failed to save task: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsSavingTask(false);
@@ -415,35 +477,165 @@ export const TasksTab = ({
     debouncedPersistSingleTask(updatedTask);
   }, [tasks, updateTasks, debouncedPersistSingleTask]);
 
-  // Task move function (for board view)
+  // Task move function (for board view) with optimistic updates and rollback
   const moveTask = async (taskId: string, newStatus: Task['status']) => {
     console.log(`[TasksTab] Attempting to move task ${taskId} to new status: ${newStatus}`);
+    
+    const movingTask = tasks.find(task => task.id === taskId);
+    if (!movingTask) {
+      console.warn(`[TasksTab] Task ${taskId} not found for move operation.`);
+      return;
+    }
+    
+    const oldStatus = movingTask.status;
+    const newOrder = getNextOrderForStatus(newStatus);
+    
+    // Save original state for rollback
+    const originalTasks = [...tasks];
+    const originalTask = { ...movingTask };
+    
+    console.log(`[TasksTab] Moving task ${movingTask.title} from ${oldStatus} to ${newStatus} with order ${newOrder}`);
+
     try {
-      const movingTask = tasks.find(task => task.id === taskId);
-      if (!movingTask) {
-        console.warn(`[TasksTab] Task ${taskId} not found for move operation.`);
-        return;
-      }
+      // Optimistic update: Update UI immediately
+      const optimisticTask = {
+        ...movingTask,
+        status: newStatus,
+        task_order: newOrder,
+        lastUpdate: Date.now()
+      };
       
-      const oldStatus = movingTask.status;
-      const newOrder = getNextOrderForStatus(newStatus);
+      const optimisticTasks = tasks.map(task => 
+        task.id === taskId ? optimisticTask : task
+      );
+      
+      // Apply optimistic update to UI
+      updateTasks(optimisticTasks);
+      console.log(`[TasksTab] Applied optimistic update for task ${taskId}`);
 
-      console.log(`[TasksTab] Moving task ${movingTask.title} from ${oldStatus} to ${newStatus} with order ${newOrder}`);
-
-      // Update the task with new status and order
+      // Attempt server update
       await projectService.updateTask(taskId, {
         status: mapUIStatusToDBStatus(newStatus),
         task_order: newOrder,
         client_timestamp: Date.now()
       });
-      console.log(`[TasksTab] Successfully updated task ${taskId} status in backend.`);
       
-      // Don't update local state immediately - let socket handle it
-      console.log(`[TasksTab] Waiting for socket update for task ${taskId}.`);
+      console.log(`[TasksTab] Successfully updated task ${taskId} status in backend.`);
       
     } catch (error) {
       console.error(`[TasksTab] Failed to move task ${taskId}:`, error);
-      alert(`Failed to move task: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      
+      // Rollback: Restore original state
+      console.log(`[TasksTab] Rolling back optimistic update for task ${taskId}`);
+      updateTasks(originalTasks);
+      
+      // User-friendly error message
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      const notification = document.createElement('div');
+      notification.className = 'fixed top-4 right-4 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg z-[9999] transition-all duration-300';
+      notification.innerHTML = `
+        <div class="flex items-center gap-2">
+          <svg class="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clip-rule="evenodd" />
+          </svg>
+          <div>
+            <div class="font-medium">Failed to move task</div>
+            <div class="text-sm opacity-90">${errorMessage}</div>
+          </div>
+        </div>
+      `;
+      
+      document.body.appendChild(notification);
+      
+      // Auto-remove notification after 5 seconds
+      setTimeout(() => {
+        notification.style.opacity = '0';
+        notification.style.transform = 'translateX(100%)';
+        setTimeout(() => {
+          if (notification.parentNode) {
+            notification.parentNode.removeChild(notification);
+          }
+        }, 300);
+      }, 5000);
+    }
+  };
+
+  // Task feature move function with optimistic updates and rollback
+  const moveTaskFeature = async (taskId: string, newFeature: string) => {
+    console.log(`[TasksTab] Attempting to move task ${taskId} to new feature: ${newFeature}`);
+    
+    const movingTask = tasks.find(task => task.id === taskId);
+    if (!movingTask) {
+      console.warn(`[TasksTab] Task ${taskId} not found for feature move operation.`);
+      return;
+    }
+    
+    const oldFeature = movingTask.feature;
+    
+    // Save original state for rollback
+    const originalTasks = [...tasks];
+    
+    console.log(`[TasksTab] Moving task ${movingTask.title} from feature ${oldFeature} to ${newFeature}`);
+
+    try {
+      // Optimistic update: Update UI immediately
+      const optimisticTask = {
+        ...movingTask,
+        feature: newFeature,
+        lastUpdate: Date.now()
+      };
+      
+      const optimisticTasks = tasks.map(task => 
+        task.id === taskId ? optimisticTask : task
+      );
+      
+      // Apply optimistic update to UI
+      updateTasks(optimisticTasks);
+      console.log(`[TasksTab] Applied optimistic update for task ${taskId} feature change`);
+
+      // Attempt server update
+      await projectService.updateTask(taskId, {
+        feature: newFeature,
+        client_timestamp: Date.now()
+      });
+      
+      console.log(`[TasksTab] Successfully updated task ${taskId} feature in backend.`);
+      
+    } catch (error) {
+      console.error(`[TasksTab] Failed to move task ${taskId} to feature ${newFeature}:`, error);
+      
+      // Rollback: Restore original state
+      console.log(`[TasksTab] Rolling back optimistic feature update for task ${taskId}`);
+      updateTasks(originalTasks);
+      
+      // User-friendly error message
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      const notification = document.createElement('div');
+      notification.className = 'fixed top-4 right-4 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg z-[9999] transition-all duration-300';
+      notification.innerHTML = `
+        <div class="flex items-center gap-2">
+          <svg class="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clip-rule="evenodd" />
+          </svg>
+          <div>
+            <div class="font-medium">Failed to change task feature</div>
+            <div class="text-sm opacity-90">${errorMessage}</div>
+          </div>
+        </div>
+      `;
+      
+      document.body.appendChild(notification);
+      
+      // Auto-remove notification after 5 seconds
+      setTimeout(() => {
+        notification.style.opacity = '0';
+        notification.style.transform = 'translateX(100%)';
+        setTimeout(() => {
+          if (notification.parentNode) {
+            notification.parentNode.removeChild(notification);
+          }
+        }, 300);
+      }, 5000);
     }
   };
 
@@ -453,24 +645,70 @@ export const TasksTab = ({
   };
 
   const deleteTask = async (task: Task) => {
+    console.log(`[TasksTab] Attempting to delete task ${task.id}: ${task.title}`);
+    
+    // Save original state for rollback
+    const originalTasks = [...tasks];
+    
     try {
-      // Delete the task - backend will emit socket event
-      await projectService.deleteTask(task.id);
-      console.log(`[TasksTab] Task ${task.id} deletion sent to backend`);
+      // Optimistic update: Remove from UI immediately
+      const optimisticTasks = tasks.filter(t => t.id !== task.id);
+      updateTasks(optimisticTasks);
+      console.log(`[TasksTab] Task ${task.id} removed from UI optimistically`);
       
-      // Don't update local state - let socket handle it
+      // Delete the task - backend will emit socket event for other clients
+      await projectService.deleteTask(task.id);
+      console.log(`[TasksTab] Task ${task.id} deletion confirmed by backend`);
+      
+      // Socket event will also arrive, but our UI is already updated
+      // The socket handler will detect the task is already removed and skip update
       
     } catch (error) {
       console.error('Failed to delete task:', error);
-      // Note: The toast notification for deletion is now handled by TaskBoardView and TaskTableView
+      
+      // Rollback on error: Restore original state
+      console.log(`[TasksTab] Rolling back deletion of task ${task.id}`);
+      updateTasks(originalTasks);
+      
+      // Note: The toast notification for deletion error is handled by TaskBoardView and TaskTableView
+      throw error; // Re-throw to let the calling component handle error notification
     }
   };
 
   // Inline task creation function
   const createTaskInline = async (newTask: Omit<Task, 'id'>) => {
+    console.log('[TasksTab] Creating new task with optimistic update');
+    
+    // Generate temporary ID for optimistic update
+    const tempId = `temp-${crypto.randomUUID()}`;
+    
+    // Auto-assign next order number if not provided
+    const nextOrder = newTask.task_order || getNextOrderForStatus(newTask.status);
+    
+    // Create optimistic task with ALL required fields properly formatted
+    const optimisticTask: Task = {
+      id: tempId,
+      title: newTask.title,
+      description: newTask.description || '',
+      status: newTask.status,
+      assignee: {
+        name: newTask.assignee?.name || 'User',
+        avatar: ''  // Required field, can be empty
+      },
+      feature: newTask.feature || 'General',
+      featureColor: newTask.featureColor || '#3b82f6',
+      task_order: nextOrder,
+      lastUpdate: Date.now()  // For conflict resolution
+    } as Task;
+    
+    // Save original state for rollback
+    const originalTasks = [...tasks];
+    
     try {
-      // Auto-assign next order number if not provided
-      const nextOrder = newTask.task_order || getNextOrderForStatus(newTask.status);
+      // Optimistic update: Add to UI immediately
+      const optimisticTasks = [...tasks, optimisticTask];
+      updateTasks(optimisticTasks);
+      console.log('[TasksTab] Task added to UI optimistically with temp ID:', tempId);
       
       const createData: CreateTaskRequest = {
         project_id: projectId,
@@ -483,13 +721,22 @@ export const TasksTab = ({
         ...(newTask.featureColor && { featureColor: newTask.featureColor })
       };
       
-      await projectService.createTask(createData);
+      const createdTask = await projectService.createTask(createData);
+      console.log('[TasksTab] Task creation confirmed by backend with ID:', createdTask.id);
       
-      // Don't reload tasks - let socket updates handle synchronization
-      console.log('[TasksTab] Task creation sent to backend, waiting for socket update');
+      // Replace temp task with real task from backend
+      const finalTasks = tasks.map(t => 
+        t.id === tempId ? mapDatabaseTaskToUITask(createdTask) : t
+      );
+      updateTasks(finalTasks);
       
     } catch (error) {
       console.error('Failed to create task:', error);
+      
+      // Rollback on error: Restore original state
+      console.log('[TasksTab] Rolling back task creation');
+      updateTasks(originalTasks);
+      
       throw error;
     }
   };
@@ -527,6 +774,25 @@ export const TasksTab = ({
       throw error;
     }
   };
+
+  // Get unique assignees from all tasks for dynamic dropdown
+  const getAvailableAssignees = useCallback((): string[] => {
+    const assignees = new Set<string>();
+    
+    // Add assignees from all existing tasks
+    tasks.forEach(task => {
+      if (task.assignee?.name) {
+        assignees.add(task.assignee.name);
+      }
+    });
+    
+    // Ensure backwards compatibility with default assignees
+    const defaultAssignees = ['User', 'Archon', 'AI IDE Agent'];
+    defaultAssignees.forEach(assignee => assignees.add(assignee));
+    
+    // Return sorted array for consistent order
+    return Array.from(assignees).sort();
+  }, [tasks]);
 
   // Get tasks for priority selection with descriptive labels
   const getTasksForPrioritySelection = (status: Task['status']): Array<{value: number, label: string}> => {
@@ -595,6 +861,7 @@ export const TasksTab = ({
               onTaskComplete={completeTask}
               onTaskDelete={deleteTask}
               onTaskMove={moveTask}
+              onTaskFeatureMove={moveTaskFeature}
               onTaskReorder={handleTaskReorder}
             />
           )}
@@ -673,6 +940,7 @@ export const TasksTab = ({
           onClose={closeModal}
           onSave={saveTask}
           getTasksForPrioritySelection={memoizedGetTasksForPrioritySelection}
+          availableAssignees={getAvailableAssignees()}
         />
       </div>
     </DndProvider>

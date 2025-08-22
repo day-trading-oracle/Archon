@@ -79,6 +79,15 @@ class DocumentService:
             )
 
             if response.data:
+                logger.info(
+                    f"Document added successfully",
+                    extra={
+                        "doc_id": new_doc["id"],
+                        "project_id": project_id,
+                        "document_type": document_type,
+                        "title": title[:50] + "..." if len(title) > 50 else title
+                    }
+                )
                 return True, {
                     "document": {
                         "id": new_doc["id"],
@@ -90,15 +99,28 @@ class DocumentService:
                     }
                 }
             else:
+                logger.error(f"Failed to add document to project {project_id}")
                 return False, {"error": "Failed to add document to project"}
 
         except Exception as e:
-            logger.error(f"Error adding document: {e}")
+            logger.error(
+                f"Error adding document: {e}",
+                extra={
+                    "project_id": project_id,
+                    "document_type": document_type,
+                    "title": title[:50] + "..." if len(title) > 50 else title,
+                    "error_type": type(e).__name__
+                }
+            )
             return False, {"error": f"Error adding document: {str(e)}"}
 
-    def list_documents(self, project_id: str) -> tuple[bool, dict[str, Any]]:
+    def list_documents(self, project_id: str, exclude_large_fields: bool = False) -> tuple[bool, dict[str, Any]]:
         """
         List all documents in a project's docs JSONB field.
+
+        Args:
+            project_id: Project ID to list documents for
+            exclude_large_fields: Exclude version, author fields to reduce response size
 
         Returns:
             Tuple of (success, result_dict)
@@ -119,17 +141,23 @@ class DocumentService:
             # Format documents for response (exclude full content for listing)
             documents = []
             for doc in docs:
-                documents.append({
+                doc_data = {
                     "id": doc.get("id"),
                     "document_type": doc.get("document_type"),
                     "title": doc.get("title"),
                     "status": doc.get("status"),
-                    "version": doc.get("version"),
                     "tags": doc.get("tags", []),
-                    "author": doc.get("author"),
                     "created_at": doc.get("created_at"),
                     "updated_at": doc.get("updated_at"),
-                })
+                }
+                
+                # Only include large fields if not excluded
+                if not exclude_large_fields:
+                    doc_data["version"] = doc.get("version")
+                    doc_data["author"] = doc.get("author")
+                    # Note: content is already excluded in listings for performance
+                
+                documents.append(doc_data)
 
             return True, {
                 "project_id": project_id,
@@ -222,9 +250,14 @@ class DocumentService:
                         document_id=doc_id,
                         created_by=update_fields.get("author", "system"),
                     )
-                except Exception as version_error:
+                except ImportError as import_error:
                     logger.warning(
-                        f"Version creation failed for document {doc_id}: {version_error}"
+                        f"VersioningService not available for document {doc_id}: {import_error}"
+                    )
+                except Exception as version_error:
+                    logger.error(
+                        f"Version creation failed for document {doc_id}: {version_error}",
+                        extra={"doc_id": doc_id, "project_id": project_id, "error_type": type(version_error).__name__}
                     )
 
             # Make a copy to modify
@@ -278,7 +311,15 @@ class DocumentService:
                 return False, {"error": "Failed to update document"}
 
         except Exception as e:
-            logger.error(f"Error updating document: {e}")
+            logger.error(
+                f"Error updating document: {e}",
+                extra={
+                    "doc_id": doc_id,
+                    "project_id": project_id,
+                    "update_fields_keys": list(update_fields.keys()) if update_fields else [],
+                    "error_type": type(e).__name__
+                }
+            )
             return False, {"error": f"Error updating document: {str(e)}"}
 
     def delete_document(self, project_id: str, doc_id: str) -> tuple[bool, dict[str, Any]]:
@@ -328,16 +369,48 @@ class DocumentService:
             return False, {"error": f"Error deleting document: {str(e)}"}
 
     def _build_change_summary(self, doc_id: str, update_fields: dict[str, Any]) -> str:
-        """Build a human-readable change summary"""
+        """Build a comprehensive human-readable change summary for audit trails"""
         changes = []
+        
+        # Track specific field changes with more detail
         if "title" in update_fields:
-            changes.append(f"title to '{update_fields['title']}'")
+            new_title = update_fields['title']
+            changes.append(f"title to '{new_title[:50]}{'...' if len(new_title) > 50 else ''}'")
+        
         if "content" in update_fields:
-            changes.append("content")
+            content = update_fields['content']
+            if isinstance(content, dict):
+                # For structured content (like PRPs), provide more detail
+                content_keys = list(content.keys())
+                if len(content_keys) <= 3:
+                    changes.append(f"content sections: {', '.join(content_keys)}")
+                else:
+                    changes.append(f"content ({len(content_keys)} sections: {', '.join(content_keys[:3])}, ...)")
+            else:
+                changes.append("content")
+        
         if "status" in update_fields:
             changes.append(f"status to '{update_fields['status']}'")
+            
+        if "tags" in update_fields:
+            tags = update_fields['tags']
+            if isinstance(tags, list) and tags:
+                changes.append(f"tags to [{', '.join(tags[:3])}{'...' if len(tags) > 3 else ''}]")
+            else:
+                changes.append("tags")
+                
+        if "author" in update_fields:
+            changes.append(f"author to '{update_fields['author']}'")
+            
+        if "version" in update_fields:
+            changes.append(f"version to '{update_fields['version']}'")
 
+        # Build comprehensive summary
         if changes:
-            return f"Updated document '{doc_id}': {', '.join(changes)}"
+            change_summary = f"Updated document '{doc_id}': {', '.join(changes)}"
+            # Add timestamp context for audit trail
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            return f"[{timestamp}] {change_summary}"
         else:
-            return f"Updated document '{doc_id}'"
+            return f"Updated document '{doc_id}' with metadata changes"

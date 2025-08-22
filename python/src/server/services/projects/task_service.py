@@ -73,9 +73,19 @@ class TaskService:
         return True, ""
 
     def validate_assignee(self, assignee: str) -> tuple[bool, str]:
-        """Validate task assignee"""
-        if not assignee or not isinstance(assignee, str) or len(assignee.strip()) == 0:
+        """Validate task assignee with enhanced validation"""
+        if not assignee or not isinstance(assignee, str):
             return False, "Assignee must be a non-empty string"
+        
+        # Strip whitespace and check length
+        trimmed_assignee = assignee.strip()
+        if len(trimmed_assignee) == 0:
+            return False, "Assignee cannot be empty or only whitespace"
+            
+        # Optional: Check for reasonable length (prevent extremely long assignee names)
+        if len(trimmed_assignee) > 100:
+            return False, "Assignee name too long (max 100 characters)"
+            
         return True, ""
 
     async def create_task(
@@ -166,6 +176,17 @@ class TaskService:
                             f"Failed to broadcast Socket.IO update for new task {task['id']}: {ws_error}"
                         )
 
+                logger.info(
+                    f"Task created successfully",
+                    extra={
+                        "task_id": task["id"],
+                        "project_id": project_id,
+                        "title": title[:50] + "..." if len(title) > 50 else title,
+                        "assignee": assignee,
+                        "task_order": task_order
+                    }
+                )
+                
                 return True, {
                     "task": {
                         "id": task["id"],
@@ -182,14 +203,28 @@ class TaskService:
                 return False, {"error": "Failed to create task"}
 
         except Exception as e:
-            logger.error(f"Error creating task: {e}")
+            logger.error(
+                f"Error creating task: {e}",
+                extra={
+                    "project_id": project_id,
+                    "title": title[:50] + "..." if len(title) > 50 else title,
+                    "assignee": assignee,
+                    "error_type": type(e).__name__
+                }
+            )
             return False, {"error": f"Error creating task: {str(e)}"}
 
     def list_tasks(
-        self, project_id: str = None, status: str = None, include_closed: bool = False
+        self, project_id: str = None, status: str = None, include_closed: bool = False, exclude_large_fields: bool = False
     ) -> tuple[bool, dict[str, Any]]:
         """
         List tasks with various filters.
+
+        Args:
+            project_id: Filter by project ID
+            status: Filter by task status
+            include_closed: Include tasks with 'done' status
+            exclude_large_fields: Exclude created_at, updated_at fields to reduce response size
 
         Returns:
             Tuple of (success, result_dict)
@@ -265,7 +300,7 @@ class TaskService:
 
             tasks = []
             for task in response.data:
-                tasks.append({
+                task_data = {
                     "id": task["id"],
                     "project_id": task["project_id"],
                     "title": task["title"],
@@ -274,9 +309,14 @@ class TaskService:
                     "assignee": task.get("assignee", "User"),
                     "task_order": task.get("task_order", 0),
                     "feature": task.get("feature"),
-                    "created_at": task["created_at"],
-                    "updated_at": task["updated_at"],
-                })
+                }
+                
+                # Only include large fields if not excluded
+                if not exclude_large_fields:
+                    task_data["created_at"] = task["created_at"]
+                    task_data["updated_at"] = task["updated_at"]
+                
+                tasks.append(task_data)
 
             filter_info = []
             if project_id:

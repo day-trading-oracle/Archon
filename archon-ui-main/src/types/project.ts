@@ -11,8 +11,8 @@ export type UITaskStatus = 'backlog' | 'in-progress' | 'review' | 'complete';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'critical';
 
 
-// Assignee type - simplified to predefined options
-export type Assignee = 'User' | 'Archon' | 'AI IDE Agent';
+// Assignee type - flexible to allow dynamic assignees while maintaining backwards compatibility
+export type Assignee = string;
 
 // Base Project interface (matches database schema)
 export interface Project {

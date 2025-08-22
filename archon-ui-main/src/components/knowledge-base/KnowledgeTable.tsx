@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { KnowledgeItem, KnowledgeItemMetadata } from '../../services/knowledgeBaseService';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
-import { Link as LinkIcon, Upload, Trash2, RefreshCw, X, Globe, BoxIcon, Brain } from 'lucide-react';
+import { Link as LinkIcon, Upload, Folder, Trash2, RefreshCw, X, Globe, BoxIcon, Brain } from 'lucide-react';
 import { format } from 'date-fns';
 
 // Reuse the same grouping logic from KnowledgeBasePage
@@ -214,6 +214,10 @@ const GroupedKnowledgeTableRow: React.FC<GroupedKnowledgeTableRowProps> = ({
           {firstItem.metadata.source_type === 'url' ? (
             <LinkIcon className={`w-4 h-4 flex-shrink-0 ${
               firstItem.metadata.knowledge_type === 'technical' ? 'text-blue-500' : 'text-cyan-500'
+            }`} />
+          ) : firstItem.metadata.source_type === 'folder' ? (
+            <Folder className={`w-4 h-4 flex-shrink-0 ${
+              firstItem.metadata.knowledge_type === 'technical' ? 'text-purple-500' : 'text-pink-500'
             }`} />
           ) : (
             <Upload className={`w-4 h-4 flex-shrink-0 ${

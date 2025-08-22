@@ -103,10 +103,21 @@ class ArchonContext:
             self.startup_time = time.time()
 
 
-async def perform_health_checks(context: ArchonContext):
-    """Perform health checks on dependent services via HTTP."""
+async def perform_health_checks(context: ArchonContext, force: bool = False):
+    """Perform health checks on dependent services via HTTP with caching optimization."""
     try:
-        # Check dependent services
+        # Cache health checks for 30 seconds to avoid excessive calls
+        now = time.time()
+        last_check_time = getattr(context, "_last_health_check_time", 0)
+        
+        if not force and (now - last_check_time) < 30:
+            logger.debug("Skipping health check - cached result still valid")
+            return
+            
+        context._last_health_check_time = now
+        
+        # Check dependent services with timeout optimization
+        logger.debug("Performing health check on dependent services")
         service_health = await context.service_client.health_check()
 
         context.health_status["api_service"] = service_health.get("api_service", False)
@@ -119,12 +130,18 @@ async def perform_health_checks(context: ArchonContext):
         context.health_status["last_health_check"] = datetime.now().isoformat()
 
         if not all_critical_ready:
-            logger.warning(f"Health check failed: {context.health_status}")
+            logger.warning(
+                f"Health check failed: {context.health_status}",
+                extra={"api_service": context.health_status["api_service"], "agents_service": context.health_status["agents_service"]}
+            )
         else:
             logger.info("Health check passed - dependent services healthy")
 
     except Exception as e:
-        logger.error(f"Health check error: {e}")
+        logger.error(
+            f"Health check error: {e}",
+            extra={"error_type": type(e).__name__, "force": force}
+        )
         context.health_status["status"] = "unhealthy"
         context.health_status["last_health_check"] = datetime.now().isoformat()
 
@@ -306,9 +323,9 @@ async def health_check(ctx: Context) -> str:
                 "timestamp": datetime.now().isoformat(),
             })
 
-        # Server is ready - perform health checks
+        # Server is ready - perform health checks (force fresh check for API call)
         if hasattr(context, "health_status") and context.health_status:
-            await perform_health_checks(context)
+            await perform_health_checks(context, force=True)
 
             return json.dumps({
                 "success": True,

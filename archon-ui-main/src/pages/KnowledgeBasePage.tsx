@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
-import { Search, Grid, Plus, Upload, Link as LinkIcon, Brain, Filter, BoxIcon, List, BookOpen, CheckSquare } from 'lucide-react';
+import { Search, Grid, Plus, Upload, Link as LinkIcon, Brain, Filter, BoxIcon, List, BookOpen, CheckSquare, Folder } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -1212,16 +1212,82 @@ const AddKnowledgeModal = ({
   onSuccess,
   onStartCrawl
 }: AddKnowledgeModalProps) => {
-  const [method, setMethod] = useState<'url' | 'file'>('url');
+  const [method, setMethod] = useState<'url' | 'file' | 'folder'>('url');
   const [url, setUrl] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState('');
   const [knowledgeType, setKnowledgeType] = useState<'technical' | 'business'>('technical');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [folderName, setFolderName] = useState('');
   const [loading, setLoading] = useState(false);
   const [crawlDepth, setCrawlDepth] = useState(2);
   const [showDepthTooltip, setShowDepthTooltip] = useState(false);
   const { showToast } = useToast();
+
+  // Supported file extensions for folder uploads
+  const supportedExtensions = ['.ts', '.tsx', '.js', '.jsx', '.py', '.md', '.json', '.pdf', '.txt', '.doc', '.docx'];
+  const maxFiles = 100;
+  const maxTotalSize = 10 * 1024 * 1024; // 10MB
+
+  // Helper function to filter supported files
+  const filterSupportedFiles = (files: File[]): File[] => {
+    return files.filter(file => {
+      const extension = '.' + file.name.split('.').pop()?.toLowerCase();
+      return supportedExtensions.includes(extension);
+    });
+  };
+
+  // Helper function to calculate total size
+  const calculateTotalSize = (files: File[]): number => {
+    return files.reduce((total, file) => total + file.size, 0);
+  };
+
+  // Helper function to format file size
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  // Handle folder selection
+  const handleFolderSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    if (files.length === 0) return;
+
+    // Filter supported files
+    const supportedFiles = filterSupportedFiles(files);
+    
+    if (supportedFiles.length === 0) {
+      showToast('No supported files found in the selected folder', 'error');
+      return;
+    }
+
+    // Check file count limit
+    if (supportedFiles.length > maxFiles) {
+      showToast(`Too many files (${supportedFiles.length}). Maximum allowed: ${maxFiles}`, 'error');
+      return;
+    }
+
+    // Check total size limit
+    const totalSize = calculateTotalSize(supportedFiles);
+    if (totalSize > maxTotalSize) {
+      showToast(`Files too large (${formatFileSize(totalSize)}). Maximum allowed: ${formatFileSize(maxTotalSize)}`, 'error');
+      return;
+    }
+
+    // Extract folder name from first file path
+    const firstFile = files[0];
+    const pathParts = firstFile.webkitRelativePath.split('/');
+    const extractedFolderName = pathParts[0] || 'Unnamed Folder';
+
+    setSelectedFiles(supportedFiles);
+    setFolderName(extractedFolderName);
+    
+    showToast(`Selected ${supportedFiles.length} files from folder "${extractedFolderName}"`, 'success');
+  };
 
   // URL validation function that checks domain existence
   const validateUrl = async (url: string): Promise<{ isValid: boolean; error?: string; formattedUrl?: string }> => {
@@ -1344,7 +1410,7 @@ const AddKnowledgeModal = ({
           showToast((result as any).message || 'Crawling started', 'success');
           onSuccess();
         }
-      } else {
+      } else if (method === 'file') {
         if (!selectedFile) {
           showToast('Please select a file', 'error');
           return;
@@ -1379,6 +1445,48 @@ const AddKnowledgeModal = ({
           
           // Fallback for non-streaming response
           showToast((result as any).message || 'Document uploaded successfully', 'success');
+          onSuccess();
+        }
+      } else if (method === 'folder') {
+        if (selectedFiles.length === 0) {
+          showToast('Please select a folder with files', 'error');
+          return;
+        }
+
+        if (!folderName) {
+          showToast('Folder name is required', 'error');
+          return;
+        }
+
+        const result = await knowledgeBaseService.uploadFolder(folderName, selectedFiles, {
+          knowledge_type: knowledgeType,
+          tags
+        });
+
+        if (result.success && result.progressId) {
+          // Folder upload started with progressId
+          
+          // Start progress tracking for folder upload
+          onStartCrawl(result.progressId, {
+            currentUrl: `folder://${folderName}`,
+            percentage: 0,
+            status: 'starting',
+            logs: [`Starting upload of ${selectedFiles.length} files from folder "${folderName}"`],
+            uploadType: 'folder',
+            fileName: folderName,
+            fileCount: selectedFiles.length
+          });
+          
+          // onStartCrawl called successfully for folder upload
+          
+          showToast(`Folder upload started - uploading ${selectedFiles.length} files`, 'success');
+          onClose(); // Close modal immediately
+        } else {
+          // No progressId in folder upload result
+          // Folder upload result structure logged
+          
+          // Fallback for non-streaming response
+          showToast((result as any).message || 'Folder uploaded successfully', 'success');
           onSuccess();
         }
       }
@@ -1428,6 +1536,10 @@ const AddKnowledgeModal = ({
           <button onClick={() => setMethod('file')} className={`flex-1 p-4 rounded-md border ${method === 'file' ? 'border-pink-500 text-pink-600 dark:text-pink-500 bg-pink-50 dark:bg-pink-500/5' : 'border-gray-200 dark:border-zinc-900 text-gray-500 dark:text-zinc-400 hover:border-pink-300 dark:hover:border-pink-500/30'} transition flex items-center justify-center gap-2`}>
             <Upload className="w-4 h-4" />
             <span>Upload File</span>
+          </button>
+          <button onClick={() => setMethod('folder')} className={`flex-1 p-4 rounded-md border ${method === 'folder' ? 'border-green-500 text-green-600 dark:text-green-500 bg-green-50 dark:bg-green-500/5' : 'border-gray-200 dark:border-zinc-900 text-gray-500 dark:text-zinc-400 hover:border-green-300 dark:hover:border-green-500/30'} transition flex items-center justify-center gap-2`}>
+            <Folder className="w-4 h-4" />
+            <span>Upload Folder</span>
           </button>
         </div>
         {/* URL Input */}
@@ -1485,6 +1597,82 @@ const AddKnowledgeModal = ({
             </p>
           </div>
         )}
+
+        {/* Folder Upload */}
+        {method === 'folder' && (
+          <div className="mb-6">
+            <label className="block text-gray-600 dark:text-zinc-400 text-sm mb-2">
+              Upload Folder
+            </label>
+            <div className="relative">
+              <input 
+                id="folder-upload"
+                type="file"
+                webkitDirectory=""
+                multiple
+                onChange={handleFolderSelect}
+                className="sr-only"
+              />
+              <label 
+                htmlFor="folder-upload"
+                className="flex items-center justify-center gap-3 w-full p-6 rounded-md border-2 border-dashed cursor-pointer transition-all duration-300
+                  bg-green-500/10 hover:bg-green-500/20 
+                  border-green-500/30 hover:border-green-500/50
+                  text-green-600 dark:text-green-400
+                  hover:shadow-[0_0_15px_rgba(34,197,94,0.3)]
+                  backdrop-blur-sm"
+              >
+                <Folder className="w-6 h-6" />
+                <div className="text-center">
+                  <div className="font-medium">
+                    {selectedFiles.length > 0 ? `${folderName} (${selectedFiles.length} files)` : 'Choose Folder'}
+                  </div>
+                  <div className="text-sm opacity-75 mt-1">
+                    {selectedFiles.length > 0 
+                      ? `${formatFileSize(calculateTotalSize(selectedFiles))} total` 
+                      : 'Click to browse and select folder'
+                    }
+                  </div>
+                </div>
+              </label>
+            </div>
+            
+            {/* File List and Validation Info */}
+            {selectedFiles.length > 0 && (
+              <div className="mt-4 space-y-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600 dark:text-zinc-400">
+                    Selected Files: {selectedFiles.length} / {maxFiles}
+                  </span>
+                  <span className="text-gray-600 dark:text-zinc-400">
+                    Total Size: {formatFileSize(calculateTotalSize(selectedFiles))} / {formatFileSize(maxTotalSize)}
+                  </span>
+                </div>
+                
+                {/* File List with scroll */}
+                <div className="max-h-32 overflow-y-auto bg-gray-50 dark:bg-zinc-900 rounded-md p-3">
+                  <div className="space-y-1">
+                    {selectedFiles.slice(0, 10).map((file, index) => (
+                      <div key={index} className="flex justify-between text-xs text-gray-600 dark:text-zinc-400">
+                        <span className="truncate mr-2">{file.webkitRelativePath || file.name}</span>
+                        <span className="flex-shrink-0">{formatFileSize(file.size)}</span>
+                      </div>
+                    ))}
+                    {selectedFiles.length > 10 && (
+                      <div className="text-xs text-gray-500 dark:text-zinc-500 text-center py-1">
+                        ... and {selectedFiles.length - 10} more files
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            <p className="text-gray-500 dark:text-zinc-600 text-sm mt-2">
+              Supports {supportedExtensions.join(', ')} files. Max {maxFiles} files, {formatFileSize(maxTotalSize)} total.
+            </p>
+          </div>
+        )}
         {/* Crawl Depth - Only for URLs */}
         {method === 'url' && (
           <div className="mb-6">
@@ -1533,7 +1721,7 @@ const AddKnowledgeModal = ({
           <Button onClick={onClose} variant="ghost" disabled={loading}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} variant="primary" accentColor={method === 'url' ? 'blue' : 'pink'} disabled={loading}>
+          <Button onClick={handleSubmit} variant="primary" accentColor={method === 'url' ? 'blue' : method === 'folder' ? 'green' : 'pink'} disabled={loading}>
             {loading ? 'Adding...' : 'Add Source'}
           </Button>
         </div>
