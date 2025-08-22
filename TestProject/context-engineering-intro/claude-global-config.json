@@ -1,0 +1,140 @@
+{
+  "name": "Archon MCP Pipeline Configuration",
+  "version": "1.0.0",
+  "description": "Global Claude Code settings for MCP pipeline with Archon orchestration",
+  
+  "mcp_servers": {
+    "archon": {
+      "name": "Archon Task Management Server",
+      "url": "http://localhost:8051",
+      "tools": [
+        "mcp__archon__manage_project",
+        "mcp__archon__manage_task", 
+        "mcp__archon__perform_rag_query",
+        "mcp__archon__search_code_examples",
+        "mcp__archon__get_available_sources"
+      ],
+      "permissions": [
+        "task_management",
+        "project_coordination", 
+        "rag_query",
+        "code_search",
+        "knowledge_base_access"
+      ],
+      "auto_connect": true,
+      "priority": "high"
+    },
+    "claude_context": {
+      "name": "Claude Context Server",
+      "url": "http://localhost:8052",
+      "tools": [
+        "search_codebase",
+        "get_file_context",
+        "analyze_dependencies",
+        "retrieve_history"
+      ],
+      "permissions": [
+        "codebase_search",
+        "history_access",
+        "pattern_analysis",
+        "dependency_mapping"
+      ],
+      "auto_connect": true,
+      "priority": "high"
+    },
+    "internet_search": {
+      "name": "Internet Search Server", 
+      "url": "http://localhost:8053",
+      "tools": [
+        "web_search",
+        "documentation_fetch",
+        "api_reference_lookup"
+      ],
+      "permissions": [
+        "web_search",
+        "documentation_access",
+        "external_api_access"
+      ],
+      "auto_connect": true,
+      "priority": "medium"
+    }
+  },
+  
+  "workflow_preferences": {
+    "default_pipeline": "mcp_distributed_archon",
+    "auto_route_complex_tasks": true,
+    "parallel_execution": true,
+    "task_complexity_threshold": "medium",
+    "prefer_archon_orchestration": true
+  },
+  
+  "task_routing": {
+    "simple_tasks": {
+      "max_complexity": "low",
+      "single_domain": true,
+      "estimated_time": "< 30 minutes",
+      "route_to": "direct_execution"
+    },
+    "complex_tasks": {
+      "min_complexity": "medium", 
+      "multi_domain": true,
+      "estimated_time": "> 30 minutes",
+      "route_to": "archon_orchestration"
+    }
+  },
+  
+  "archon_integration": {
+    "project_id": "6d0d8ce0-d80d-4132-8c26-2845a61518b8",
+    "default_assignees": {
+      "frontend": "frontend-specialist",
+      "backend": "backend-specialist", 
+      "database": "database-specialist",
+      "testing": "testing-specialist",
+      "documentation": "documentation-specialist",
+      "orchestration": "master-orchestrator"
+    },
+    "task_statuses": ["todo", "doing", "review", "done"],
+    "quality_gates": {
+      "code_review": true,
+      "testing_required": true,
+      "documentation_required": true
+    }
+  },
+  
+  "environment_variables": {
+    "MCP_PIPELINE_ENABLED": "true",
+    "ARCHON_SERVER_URL": "http://localhost:8051",
+    "CLAUDE_CONTEXT_URL": "http://localhost:8052", 
+    "SEARCH_SERVER_URL": "http://localhost:8053",
+    "AUTO_TASK_ROUTING": "true",
+    "PARALLEL_PROCESSING": "true",
+    "LOG_LEVEL": "INFO"
+  },
+  
+  "security": {
+    "allowed_domains": [
+      "localhost",
+      "127.0.0.1", 
+      "archon-server",
+      "claude-context",
+      "search-server"
+    ],
+    "require_authentication": false,
+    "timeout_seconds": 30
+  },
+  
+  "performance": {
+    "max_concurrent_tasks": 5,
+    "token_optimization": true,
+    "context_compression": true,
+    "cache_responses": true,
+    "cache_duration_minutes": 30
+  },
+  
+  "logging": {
+    "log_mcp_calls": true,
+    "log_task_routing": true,
+    "log_performance_metrics": true,
+    "log_level": "INFO"
+  }
+}
