@@ -86,7 +86,7 @@ class DocumentStorageService(BaseStorageService):
                 await report_progress("Preparing document chunks...", 30)
 
                 # Prepare data for storage
-                doc_url = f"file://{filename}"
+                doc_url = f"file://{source_id}/{filename}"
                 urls = []
                 chunk_numbers = []
                 contents = []

@@ -3,6 +3,8 @@ __pycache__
 .serena
 .claude/settings.local.json
 PRPs/local
+TestProject/local
+TestProject
 
 # CLAUDE FAST FRAMEWORK (PRIVATE)
 .claude/
