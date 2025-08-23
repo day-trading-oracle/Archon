@@ -5,7 +5,8 @@ __pycache__
 PRPs/local
 TestProject/local
 TestProject
-
+McpPipeline/local
+McpPipeline
 # CLAUDE FAST FRAMEWORK (PRIVATE)
 .claude/
 CLAUDE.md
